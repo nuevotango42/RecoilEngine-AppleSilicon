@@ -36,6 +36,7 @@ patch_list() { ls "$PATCH_DIR"/*.patch 2>/dev/null | sort; }
 want_stamp() {
   echo "mesa_commit=$MESA_COMMIT"
   echo "spirv_xlat=$SPIRV_XLAT_TAG"
+  echo "libclc=19.1.7;static=all"
   local p
   for p in $(patch_list); do
     echo "patch=$(basename "$p"):$(shasum -a 256 "$p" | cut -d' ' -f1)"
@@ -166,12 +167,12 @@ STAGE="$DEPS/mesa-stage"
 
 rm -rf build-native "$STAGE"
 meson setup build-native --native-file "$DEPS/plain-native.ini" \
-  --pkg-config-path "$DEPS/spirv-xlat-install/lib/pkgconfig" \
+  --pkg-config-path "$DEPS/spirv-xlat-install/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
   -Dprefix="$NEUTRAL_PREFIX" -Dplatforms=macos \
   -Degl-native-platform=surfaceless -Degl=enabled -Dglx=disabled \
   -Dgallium-drivers=zink -Dvulkan-drivers=kosmickrisp \
   -Dmoltenvk-dir=/opt/homebrew/opt/molten-vk \
-  -Dllvm=enabled -Dshared-llvm=disabled -Dbuildtype=release
+  -Dllvm=enabled -Dshared-llvm=disabled -Dstatic-libclc=all -Dbuildtype=release
 DESTDIR="$STAGE" ninja -C build-native install
 
 # relocate the neutral prefix tree into the real install location
@@ -179,6 +180,20 @@ test -d "$STAGE$NEUTRAL_PREFIX" || { echo "FATAL: staged install missing $STAGE$
 mkdir -p "$MESA_PREFIX"
 (cd "$STAGE$NEUTRAL_PREFIX" && tar cf - .) | (cd "$MESA_PREFIX" && tar xf -)
 rm -rf "$STAGE"
+
+# LESSON-41: a hygiene claim about a binary must be verified BY GREPPING THE
+# BINARY, never inferred from the compiler flags. Any absolute /Users/ path
+# compiled into a driver dylib is a leak the moment the bundle is notarized.
+# NB: raw byte grep, not `strings` — `strings` reads only the text section and
+# silently misses debug-map/symbol-table paths.
+# Scan before install_name_tool adds the intentional local runtime paths.
+leaks=0
+for d in "$MESA_PREFIX"/lib/*.dylib; do
+  hits="$(LC_ALL=C grep -a -o '/Users/[^ "]\{0,120\}' "$d" 2>/dev/null | LC_ALL=C sort -u || true)"
+  [ -z "$hits" ] || { n=$(echo "$hits" | wc -l | tr -d ' '); echo "FATAL: $(basename "$d") embeds $n /Users/ path(s):"; echo "$hits" | head -5 | sed 's/^/    /'; leaks=$((leaks+n)); }
+done
+[ "$leaks" -eq 0 ] || { echo "FATAL: driver embeds $leaks builder-path string(s) — see LESSON-41"; exit 1; }
+echo "driver path-leak scan: 0 /Users/ strings across $(ls "$MESA_PREFIX"/lib/*.dylib | wc -l | tr -d ' ') dylibs"
 
 # meson baked the neutral prefix into each dylib's install name (LC_ID_DYLIB)
 # and into its inter-library dependencies. /opt/bar-driver does not exist on
@@ -214,19 +229,6 @@ test -f "$MESA_PREFIX/lib/libvulkan_kosmickrisp.dylib" || { echo "FATAL: kosmick
 file "$MESA_PREFIX/lib/libEGL.dylib" | grep -q arm64 || { echo "FATAL: libEGL not arm64"; exit 1; }
 ls "$MESA_PREFIX/lib/"*.dylib
 ls "$MESA_PREFIX/share/vulkan/icd.d/" 2>/dev/null || true
-
-# LESSON-41: a hygiene claim about a binary must be verified BY GREPPING THE
-# BINARY, never inferred from the compiler flags. Any absolute /Users/ path
-# compiled into a driver dylib is a leak the moment the bundle is notarized.
-# NB: raw byte grep, not `strings` — `strings` reads only the text section and
-# silently misses debug-map/symbol-table paths.
-leaks=0
-for d in "$MESA_PREFIX"/lib/*.dylib; do
-  hits="$(LC_ALL=C grep -a -o '/Users/[^ "]\{0,120\}' "$d" 2>/dev/null | sort -u || true)"
-  [ -z "$hits" ] || { n=$(echo "$hits" | wc -l | tr -d ' '); echo "FATAL: $(basename "$d") embeds $n /Users/ path(s):"; echo "$hits" | head -5 | sed 's/^/    /'; leaks=$((leaks+n)); }
-done
-[ "$leaks" -eq 0 ] || { echo "FATAL: driver embeds $leaks builder-path string(s) — see LESSON-41"; exit 1; }
-echo "driver path-leak scan: 0 /Users/ strings across $(ls "$MESA_PREFIX"/lib/*.dylib | wc -l | tr -d ' ') dylibs"
 
 # stamp the provenance so subsequent builds are a no-op until the pin/patches change
 printf '%s\n' "$WANT" > "$STAMP_FILE"
