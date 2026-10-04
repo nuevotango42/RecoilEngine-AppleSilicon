@@ -12,6 +12,7 @@ namespace agui
 
 int GuiElement::screensize[2];
 int GuiElement::screenoffset[2];
+static float mouseScale[2] = {1.0f, 1.0f};
 
 GuiElement::GuiElement(GuiElement* _parent) : parent(_parent), fixedSize(false), weight(1)
 {
@@ -60,22 +61,24 @@ bool GuiElement::MouseOver(float x, float y) const
 	return (x >= pos[0] && x <= pos[0]+size[0]) && (y >= pos[1] && y <= pos[1]+size[1]);
 }
 
-void GuiElement::UpdateDisplayGeo(int x, int y, int xOffset, int yOffset)
+void GuiElement::UpdateDisplayGeo(int x, int y, int xOffset, int yOffset, float mouseScaleX, float mouseScaleY)
 {
 	screensize[0] = x;
 	screensize[1] = y;
 	screenoffset[0] = xOffset;
 	screenoffset[1] = yOffset;
+	mouseScale[0] = mouseScaleX;
+	mouseScale[1] = mouseScaleY;
 }
 
 float GuiElement::PixelToGlX(int x)
 {
-	return float(x - screenoffset[0])/float(screensize[0]);
+	return (float(x) * mouseScale[0] - float(screenoffset[0]))/float(screensize[0]);
 }
 
 float GuiElement::PixelToGlY(int y)
 {
-	return 1.0f - float(y - screenoffset[1])/float(screensize[1]);
+	return 1.0f - (float(y) * mouseScale[1] - float(screenoffset[1]))/float(screensize[1]);
 }
 
 float GuiElement::GlToPixelX(float x)

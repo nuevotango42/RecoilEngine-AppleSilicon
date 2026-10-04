@@ -27,7 +27,7 @@ public:
 	bool MouseOver(int x, int y) const;
 	bool MouseOver(float x, float y) const;
 
-	static void UpdateDisplayGeo(int x, int y, int offsetX, int offsetY);
+	static void UpdateDisplayGeo(int x, int y, int offsetX, int offsetY, float mouseScaleX = 1.0f, float mouseScaleY = 1.0f);
 	static float PixelToGlX(int x);
 	static float PixelToGlY(int y);
 	static float GlToPixelX(float x);

@@ -100,7 +100,21 @@ void Gui::RmElement(GuiElement* elem)
 
 void Gui::UpdateScreenGeometry(int screenx, int screeny, int screenOffsetX, int screenOffsetY)
 {
-	GuiElement::UpdateDisplayGeo(screenx, screeny, screenOffsetX, screenOffsetY);
+	float mouseScaleX = 1.0f;
+	float mouseScaleY = 1.0f;
+#if defined(__APPLE__) && !defined(HEADLESS)
+	// aGUI receives SDL point coordinates but its geometry is in pbuffer pixels.
+	int windowW = 0;
+	int windowH = 0;
+	if (globalRendering != nullptr && globalRendering->GetWindow() != nullptr) {
+		SDL_GetWindowSize(globalRendering->GetWindow(), &windowW, &windowH);
+		if (windowW > 1 && globalRendering->winSizeX > 1)
+			mouseScaleX = float(globalRendering->winSizeX - 1) / float(windowW - 1);
+		if (windowH > 1 && globalRendering->winSizeY > 1)
+			mouseScaleY = float(globalRendering->winSizeY - 1) / float(windowH - 1);
+	}
+#endif
+	GuiElement::UpdateDisplayGeo(screenx, screeny, screenOffsetX, screenOffsetY, mouseScaleX, mouseScaleY);
 }
 
 bool Gui::MouseOverElement(const GuiElement* elem, int x, int y) const
@@ -140,4 +154,3 @@ bool Gui::HandleEvent(const SDL_Event& ev)
 Gui* gui = nullptr;
 
 }
-
