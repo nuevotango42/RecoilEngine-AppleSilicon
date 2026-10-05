@@ -1,0 +1,136 @@
+diff --git a/src/circuit/script/InitScript.cpp b/src/circuit/script/InitScript.cpp
+index 7c8a57d3..0b110ae1 100644
+--- a/src/circuit/script/InitScript.cpp
++++ b/src/circuit/script/InitScript.cpp
+@@ -25,14 +25,23 @@ namespace circuit {
+ 
+ using namespace springai;
+ 
+-static void ConstructTypeMask(CMaskHandler::TypeMask* mem)
++static void ConstructTypeMask(asIScriptGeneric* generic)
+ {
+-	new(mem) CMaskHandler::TypeMask();
++	new(generic->GetObject()) CMaskHandler::TypeMask();
+ }
+ 
+-static void ConstructCopyTypeMask(CMaskHandler::TypeMask* mem, const CMaskHandler::TypeMask& o)
++static void ConstructCopyTypeMask(asIScriptGeneric* generic)
+ {
+-	new(mem) CMaskHandler::TypeMask(o);
++	const CMaskHandler::TypeMask* other = static_cast<const CMaskHandler::TypeMask*>(generic->GetArgObject(0));
++	new(generic->GetObject()) CMaskHandler::TypeMask(*other);
++}
++
++static void GetTypeMaskGeneric(asIScriptGeneric* generic)
++{
++	CMaskHandler* handler = static_cast<CMaskHandler*>(generic->GetObject());
++	const std::string* name = static_cast<const std::string*>(generic->GetArgObject(0));
++	CMaskHandler::TypeMask result = handler->GetTypeMask(*name);
++	generic->SetReturnObject(&result);
+ }
+ 
+ CInitScript::CInitScript(CScriptManager* scr, CCircuitAI* ai)
+@@ -43,14 +52,14 @@ CInitScript::CInitScript(CScriptManager* scr, CCircuitAI* ai)
+ 	int r;
+ 
+ 	// RegisterUtils
+-	r = engine->RegisterGlobalFunction("void aiLog(const string& in)", asMETHOD(CInitScript, Log), asCALL_THISCALL_ASGLOBAL, this); ASSERT(r >= 0);
+-	r = engine->RegisterGlobalFunction("int aiDice(const array<float>@+)", asMETHOD(CInitScript, Dice), asCALL_THISCALL_ASGLOBAL, this); ASSERT(r >= 0);
+-	r = engine->RegisterGlobalFunction("int aiMax(int, int)", asMETHODPR(CInitScript, Max<int>, (int, int) const, int), asCALL_THISCALL_ASGLOBAL, this); ASSERT(r >= 0);
+-	r = engine->RegisterGlobalFunction("float aiMax(float, float)", asMETHODPR(CInitScript, Max<float>, (float, float) const, float), asCALL_THISCALL_ASGLOBAL, this); ASSERT(r >= 0);
++	r = engine->RegisterGlobalFunction("void aiLog(const string& in)", asFUNCTION(CInitScript::GenericLog), asCALL_GENERIC, this); ASSERT(r >= 0);
++	r = engine->RegisterGlobalFunction("int aiDice(const array<float>@+)", asFUNCTION(CInitScript::GenericDice), asCALL_GENERIC, this); ASSERT(r >= 0);
++	r = engine->RegisterGlobalFunction("int aiMax(int, int)", asFUNCTION(CInitScript::GenericMaxInt), asCALL_GENERIC, this); ASSERT(r >= 0);
++	r = engine->RegisterGlobalFunction("float aiMax(float, float)", asFUNCTION(CInitScript::GenericMaxFloat), asCALL_GENERIC, this); ASSERT(r >= 0);
+ 
+ 	r = engine->RegisterObjectType("TypeMask", sizeof(CMaskHandler::TypeMask), asOBJ_VALUE | asOBJ_POD | asGetTypeTraits<CMaskHandler::TypeMask>()); ASSERT(r >= 0);
+-	r = engine->RegisterObjectBehaviour("TypeMask", asBEHAVE_CONSTRUCT, "void f()", asFUNCTION(ConstructTypeMask), asCALL_CDECL_OBJLAST); ASSERT(r >= 0);
+-	r = engine->RegisterObjectBehaviour("TypeMask", asBEHAVE_CONSTRUCT, "void f(const TypeMask& in)", asFUNCTION(ConstructCopyTypeMask), asCALL_CDECL_OBJFIRST); ASSERT(r >= 0);
++	r = engine->RegisterObjectBehaviour("TypeMask", asBEHAVE_CONSTRUCT, "void f()", asFUNCTION(ConstructTypeMask), asCALL_GENERIC); ASSERT(r >= 0);
++	r = engine->RegisterObjectBehaviour("TypeMask", asBEHAVE_CONSTRUCT, "void f(const TypeMask& in)", asFUNCTION(ConstructCopyTypeMask), asCALL_GENERIC); ASSERT(r >= 0);
+ 	r = engine->RegisterTypedef("Type", "int"); ASSERT(r >= 0);
+ 	r = engine->RegisterTypedef("Mask", "uint"); ASSERT(r >= 0);
+ 	r = engine->RegisterObjectProperty("TypeMask", "Type type", asOFFSET(CMaskHandler::TypeMask, type)); ASSERT(r >= 0);
+@@ -61,9 +70,9 @@ CInitScript::CInitScript(CScriptManager* scr, CCircuitAI* ai)
+ 	r = engine->RegisterObjectType("CMaskHandler", 0, asOBJ_REF | asOBJ_NOHANDLE); ASSERT(r >= 0);
+ 	r = engine->RegisterGlobalProperty("CMaskHandler aiSideMasker", sideMasker); ASSERT(r >= 0);
+ 	r = engine->RegisterGlobalProperty("CMaskHandler aiRoleMasker", roleMasker); ASSERT(r >= 0);
+-	r = engine->RegisterObjectMethod("CMaskHandler", "TypeMask GetTypeMask(const string& in)", asMETHOD(CMaskHandler, GetTypeMask), asCALL_THISCALL); ASSERT(r >= 0);
++	r = engine->RegisterObjectMethod("CMaskHandler", "TypeMask GetTypeMask(const string& in)", asFUNCTION(GetTypeMaskGeneric), asCALL_GENERIC); ASSERT(r >= 0);
+ 
+-	r = engine->RegisterGlobalFunction("TypeMask aiAddRole(const string& in, Type)", asMETHOD(CInitScript, AddRole), asCALL_THISCALL_ASGLOBAL, this); ASSERT(r >= 0);
++	r = engine->RegisterGlobalFunction("TypeMask aiAddRole(const string& in, Type)", asFUNCTION(CInitScript::GenericAddRole), asCALL_GENERIC, this); ASSERT(r >= 0);
+ 
+ 	r = engine->RegisterTypedef("Id", "int"); ASSERT(r >= 0);
+ }
+@@ -72,6 +81,45 @@ CInitScript::~CInitScript()
+ {
+ }
+ 
++void CInitScript::GenericLog(asIScriptGeneric* generic)
++{
++	CInitScript* self = static_cast<CInitScript*>(generic->GetAuxiliary());
++	const std::string* msg = static_cast<const std::string*>(generic->GetArgObject(0));
++	self->Log(*msg);
++}
++
++void CInitScript::GenericDice(asIScriptGeneric* generic)
++{
++	CInitScript* self = static_cast<CInitScript*>(generic->GetAuxiliary());
++	const CScriptArray* array = static_cast<const CScriptArray*>(generic->GetArgObject(0));
++	generic->SetReturnDWord(static_cast<asDWORD>(self->Dice(array)));
++}
++
++void CInitScript::GenericMaxInt(asIScriptGeneric* generic)
++{
++	CInitScript* self = static_cast<CInitScript*>(generic->GetAuxiliary());
++	const int left = static_cast<int>(generic->GetArgDWord(0));
++	const int right = static_cast<int>(generic->GetArgDWord(1));
++	generic->SetReturnDWord(static_cast<asDWORD>(self->Max<int>(left, right)));
++}
++
++void CInitScript::GenericMaxFloat(asIScriptGeneric* generic)
++{
++	CInitScript* self = static_cast<CInitScript*>(generic->GetAuxiliary());
++	const float left = generic->GetArgFloat(0);
++	const float right = generic->GetArgFloat(1);
++	generic->SetReturnFloat(self->Max<float>(left, right));
++}
++
++void CInitScript::GenericAddRole(asIScriptGeneric* generic)
++{
++	CInitScript* self = static_cast<CInitScript*>(generic->GetAuxiliary());
++	const std::string* name = static_cast<const std::string*>(generic->GetArgObject(0));
++	const int actAsRole = static_cast<int>(generic->GetArgDWord(1));
++	CMaskHandler::TypeMask result = self->AddRole(*name, actAsRole);
++	generic->SetReturnObject(&result);
++}
++
+ void CInitScript::InitConfig(std::map<std::string, std::vector<std::string>>& outProfiles)
+ {
+ 	if (!script->Load("init", "init.as")) {
+diff --git a/src/circuit/script/InitScript.h b/src/circuit/script/InitScript.h
+index 9d83022c..6bef546d 100644
+--- a/src/circuit/script/InitScript.h
++++ b/src/circuit/script/InitScript.h
+@@ -14,6 +14,7 @@
+ #include <map>
+ 
+ class asIScriptFunction;
++class asIScriptGeneric;
+ class CScriptArray;
+ 
+ namespace circuit {
+@@ -29,6 +30,12 @@ public:
+ 	void InitConfig(std::map<std::string, std::vector<std::string>>& outProfiles);
+ 
+ private:
++	static void GenericLog(asIScriptGeneric* generic);
++	static void GenericDice(asIScriptGeneric* generic);
++	static void GenericMaxInt(asIScriptGeneric* generic);
++	static void GenericMaxFloat(asIScriptGeneric* generic);
++	static void GenericAddRole(asIScriptGeneric* generic);
++
+ 	CMaskHandler::TypeMask AddRole(const std::string& name, int actAsRole);
+ 
+ 	void Log(const std::string& msg) const;

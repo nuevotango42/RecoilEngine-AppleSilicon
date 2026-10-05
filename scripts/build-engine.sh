@@ -101,7 +101,7 @@ cmake --fresh -S "$SRC" -B "$BUILD" -G Ninja \
   -DCMAKE_CXX_FLAGS="$PREFIX_MAP" \
   -DCMAKE_OBJC_FLAGS="$PREFIX_MAP" \
   -DCMAKE_OBJCXX_FLAGS="$PREFIX_MAP" \
-  -DAI_TYPES="${AI_TYPES:-NATIVE}" -DAI_EXCLUDE_REGEX="CircuitAI|CppTestAI" \
+  -DAI_TYPES="${AI_TYPES:-NATIVE}" -DAI_EXCLUDE_REGEX="CppTestAI" \
   -DUSERDOCS_PLAIN=ON \
   -DCMAKE_C_COMPILER_LAUNCHER=ccache \
   -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
@@ -111,23 +111,53 @@ cmake --fresh -S "$SRC" -B "$BUILD" -G Ninja \
   -DOPENAL_LIBRARY="$OPENAL_LIB" \
   -DOPENAL_INCLUDE_DIR="$OPENAL_INC"
 
+if [ "${AI_TYPES:-NATIVE}" != "NONE" ]; then
+  # AngelScript portability mode on Apple arm64 requires generic callbacks.
+  # Apply the tracked patch only during compilation; the EXIT trap restores the submodule.
+  CIRCUITAI_SRC="$SRC/AI/Skirmish/CircuitAI"
+  CIRCUITAI_PATCH="$BAR/scripts/patches/circuitai-arm64-angelscript-generic.patch"
+  CIRCUITAI_PATCH_APPLIED=0
+
+  restore_circuitai_patch() {
+    if [ "$CIRCUITAI_PATCH_APPLIED" = 1 ]; then
+      git -C "$CIRCUITAI_SRC" apply --reverse "$CIRCUITAI_PATCH"
+      CIRCUITAI_PATCH_APPLIED=0
+    fi
+  }
+  trap restore_circuitai_patch EXIT
+
+  if git -C "$CIRCUITAI_SRC" apply --reverse --check "$CIRCUITAI_PATCH" >/dev/null 2>&1; then
+    echo "CircuitAI AngelScript portability patch is already applied"
+  elif git -C "$CIRCUITAI_SRC" apply --check "$CIRCUITAI_PATCH"; then
+    git -C "$CIRCUITAI_SRC" apply "$CIRCUITAI_PATCH"
+    CIRCUITAI_PATCH_APPLIED=1
+  else
+    echo "FATAL: CircuitAI AngelScript portability patch does not apply cleanly"
+    exit 1
+  fi
+fi
+
 NINJA_TARGETS=(spring spring-headless pr-downloader_cli basecontent)
 if [ "${AI_TYPES:-NATIVE}" != "NONE" ]; then
-  # BARb (CircuitAI-based) + NullAI + the C interface; the CircuitAI sibling
-  # submodule needs the same arm64 fixes and BAR only uses BARb, so it stays
-  # excluded (AI_EXCLUDE_REGEX above).
-  NINJA_TARGETS+=("AI/Interfaces/C/all" "AI/Skirmish/BARb/all" "AI/Skirmish/NullAI/all")
+  # Zero-K uses CircuitAI difficulty profiles; BARb and NullAI remain available too.
+  NINJA_TARGETS+=("AI/Interfaces/C/all" "AI/Skirmish/CircuitAI/all" "AI/Skirmish/BARb/all" "AI/Skirmish/NullAI/all")
 fi
 ninja -C "$BUILD" -j"$(sysctl -n hw.ncpu)" "${NINJA_TARGETS[@]}"
+if [ "${AI_TYPES:-NATIVE}" != "NONE" ]; then
+  restore_circuitai_patch
+  trap - EXIT
+fi
 
 if [ "${AI_TYPES:-NATIVE}" != "NONE" ]; then
   # Assemble the runtime AI tree the engine scans (AI/<kind>/<name>/<version>/
   # with the info .lua files beside the dylib). Build outputs land in
   # .../<name>/data/ which the engine ignores (no AIInfo.lua there).
-  rm -rf "$BUILD/AI/Interfaces/C/0.1" "$BUILD/AI/Skirmish/BARb/stable" "$BUILD/AI/Skirmish/NullAI/0.1"
-  mkdir -p "$BUILD/AI/Interfaces/C/0.1" "$BUILD/AI/Skirmish/BARb/stable" "$BUILD/AI/Skirmish/NullAI/0.1"
+  rm -rf "$BUILD/AI/Interfaces/C/0.1" "$BUILD/AI/Skirmish/CircuitAI/stable" "$BUILD/AI/Skirmish/BARb/stable" "$BUILD/AI/Skirmish/NullAI/0.1"
+  mkdir -p "$BUILD/AI/Interfaces/C/0.1" "$BUILD/AI/Skirmish/CircuitAI/stable" "$BUILD/AI/Skirmish/BARb/stable" "$BUILD/AI/Skirmish/NullAI/0.1"
   cp -R "$SRC/AI/Interfaces/C/data/." "$BUILD/AI/Interfaces/C/0.1/"
   cp "$BUILD/AI/Interfaces/C/data/libAIInterface.dylib" "$BUILD/AI/Interfaces/C/0.1/"
+  cp -R "$SRC/AI/Skirmish/CircuitAI/data/." "$BUILD/AI/Skirmish/CircuitAI/stable/"
+  cp "$BUILD/AI/Skirmish/CircuitAI/data/libSkirmishAI.dylib" "$BUILD/AI/Skirmish/CircuitAI/stable/"
   cp -R "$SRC/AI/Skirmish/BARb/data/." "$BUILD/AI/Skirmish/BARb/stable/"
   cp "$BUILD/AI/Skirmish/BARb/data/libSkirmishAI.dylib" "$BUILD/AI/Skirmish/BARb/stable/"
   cp -R "$SRC/AI/Skirmish/NullAI/data/." "$BUILD/AI/Skirmish/NullAI/0.1/"
